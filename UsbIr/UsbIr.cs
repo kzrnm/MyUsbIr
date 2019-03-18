@@ -110,9 +110,6 @@ namespace UsbIr
         {
             this.RecStatus = RecStatus.NowRecoding;
 
-            uint bytesWritten = 0;
-            uint bytesRead = 0;
-
             var outBuffer = new byte[65];
             var inBuffer = new byte[65];
 
@@ -126,11 +123,7 @@ namespace UsbIr
             outBuffer[7] = 10;   // 読み込み停止OFF時間MSB
             outBuffer[8] = 0;   // 読み込み停止OFF時間LSB
 
-            //To get the pushbutton state, first, we send a packet with our "Get Pushbutton State" command in it.
-            if (!WriteFile(outBuffer, 65, ref bytesWritten, IntPtr.Zero))    //Blocking function, unless an "overlapped" structure is used
-                throw new UsbIrException("cannot start recoding");
-
-            if (!ReadFileManagedBuffer(inBuffer, 65, ref bytesRead, IntPtr.Zero)) //Blocking function, unless an "overlapped" structure is used
+            if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
                 throw new UsbIrException("cannot start recoding");
 
             //INBuffer[0] is the report ID, which we don't care about.
@@ -143,21 +136,13 @@ namespace UsbIr
         }
         public void EndRecoding()
         {
-
-            uint bytesWritten = 0;
-            uint bytesRead = 0;
-
             var outBuffer = new byte[65];
             var inBuffer = new byte[65];
 
             outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
             outBuffer[1] = 0x32;        //0x81 is the "Get Pushbutton State" command in the firmware
 
-            //To get the pushbutton state, first, we send a packet with our "Get Pushbutton State" command in it.
-            if (!WriteFile(outBuffer, 65, ref bytesWritten, IntPtr.Zero))	//Blocking function, unless an "overlapped" structure is used
-                throw new UsbIrException("cannot end recoding");
-
-            if (!ReadFileManagedBuffer(inBuffer, 65, ref bytesRead, IntPtr.Zero)) //Blocking function, unless an "overlapped" structure is used
+            if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
                 throw new UsbIrException("cannot end recoding");
 
             //INBuffer[0] is the report ID, which we don't care about.
@@ -173,9 +158,6 @@ namespace UsbIr
             if (this.RecStatus != RecStatus.Complete)
                 throw new InvalidOperationException();
 
-            uint bytesWritten = 0;
-            uint bytesRead = 0;
-
             var outBuffer = new byte[65];
             var inBuffer = new byte[65];
 
@@ -188,13 +170,8 @@ namespace UsbIr
 
             while (true)
             {
-                //To get the pushbutton state, first, we send a packet with our "Get Pushbutton State" command in it.
-                if (!WriteFile(outBuffer, 65, ref bytesWritten, IntPtr.Zero))   //Blocking function, unless an "overlapped" structure is used
+                if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
                     throw new UsbIrException("cannot read");
-
-                if (!ReadFileManagedBuffer(inBuffer, 65, ref bytesRead, IntPtr.Zero)) //Blocking function, unless an "overlapped" structure is used
-                    throw new UsbIrException("cannot read");
-
 
                 //INBuffer[0] is the report ID, which we don't care about.
                 //INBuffer[1] is an echo back of the command (see microcontroller firmware).
@@ -209,7 +186,7 @@ namespace UsbIr
 
                 if (totalSize > 0 && totalSize >= (startPosition + readSize) && readSize > 0)
                 {
-                    for (int i = 0; i < readSize; i ++)
+                    for (int i = 0; i < readSize; i++)
                     {
                         var fi = 4 * i;
                         resultBuffer[resultBufferIndex++] = inBuffer[7 + fi];
@@ -231,8 +208,8 @@ namespace UsbIr
 
         public void Send(byte[] data, uint frequency = 38000)
         {
-            byte[] outbuffer = new byte[65];
-            byte[] inbuffer = new byte[65];
+            byte[] outBuffer = new byte[65];
+            byte[] inBuffer = new byte[65];
             uint BytesWritten = 0;
             uint BytesRead = 0;
             uint send_bit_num = (uint)data.Length / 4;            // 送信ビット数　リーダーコード + コード + 終了コード
@@ -247,13 +224,13 @@ namespace UsbIr
             // データセット
             while (true)
             {
-                outbuffer[0] = 0x00;
-                outbuffer[1] = 0x34;
+                outBuffer[0] = 0x00;
+                outBuffer[1] = 0x34;
                 //送信総ビット数
-                outbuffer[2] = (byte)((send_bit_num >> 8) & 0xFF);
-                outbuffer[3] = (byte)(send_bit_num & 0xFF);
-                outbuffer[4] = (byte)((send_bit_pos >> 8) & 0xFF);
-                outbuffer[5] = (byte)(send_bit_pos & 0xFF);
+                outBuffer[2] = (byte)((send_bit_num >> 8) & 0xFF);
+                outBuffer[3] = (byte)(send_bit_num & 0xFF);
+                outBuffer[4] = (byte)((send_bit_pos >> 8) & 0xFF);
+                outBuffer[5] = (byte)(send_bit_pos & 0xFF);
                 if (send_bit_num > send_bit_pos)
                 {
                     set_bit_size = send_bit_num - send_bit_pos;
@@ -267,34 +244,34 @@ namespace UsbIr
                     break;
                 }
 
-                outbuffer[6] = (byte)(set_bit_size & 0xFF);
+                outBuffer[6] = (byte)(set_bit_size & 0xFF);
 
                 // データセット
                 // 赤外線コードコピー
                 for (uint fi = 0; fi < set_bit_size; fi++)
                 {
                     // ON Count
-                    outbuffer[7 + (fi * 4)] = data[send_bit_pos * 4];
-                    outbuffer[7 + (fi * 4) + 1] = data[(send_bit_pos * 4) + 1];
+                    outBuffer[7 + (fi * 4)] = data[send_bit_pos * 4];
+                    outBuffer[7 + (fi * 4) + 1] = data[(send_bit_pos * 4) + 1];
                     // OFF Count
-                    outbuffer[7 + (fi * 4) + 2] = data[(send_bit_pos * 4) + 2];
-                    outbuffer[7 + (fi * 4) + 3] = data[(send_bit_pos * 4) + 3];
+                    outBuffer[7 + (fi * 4) + 2] = data[(send_bit_pos * 4) + 2];
+                    outBuffer[7 + (fi * 4) + 3] = data[(send_bit_pos * 4) + 3];
                     send_bit_pos++;
                 }
-                if (!WriteFile(outbuffer, 65, ref BytesWritten, IntPtr.Zero))
+                if (!WriteFile(outBuffer, 65, ref BytesWritten, IntPtr.Zero))
                     throw new UsbIrException("on setting data");
 
                 //Now get the response packet from the firmware.
-                inbuffer[0] = 0;
+                inBuffer[0] = 0;
 
 
-                if (!ReadFileManagedBuffer(inbuffer, 65, ref BytesRead, IntPtr.Zero))
+                if (!ReadFileManagedBuffer(inBuffer, 65, ref BytesRead, IntPtr.Zero))
                     throw new UsbIrException("on setting data");
 
                 //INBuffer[0] is the report ID, which we don't care about.
                 //INBuffer[1] is an echo back of the command (see microcontroller firmware).
                 //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-                if (inbuffer[1] == 0x34 && inbuffer[2] != 0x00)
+                if (inBuffer[1] == 0x34 && inBuffer[2] != 0x00)
                     throw new UsbIrException("on setting data");
             }
 
@@ -303,26 +280,20 @@ namespace UsbIr
 
 
             // データ送信要求セット
-            outbuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
-            outbuffer[1] = 0x35;        //0x81 is the "Get Pushbutton State" command in the firmware
-            outbuffer[2] = (byte)((frequency >> 8) & 0xFF);
-            outbuffer[3] = (byte)(frequency & 0xFF);
-            outbuffer[4] = (byte)((send_bit_num >> 8) & 0xFF);
-            outbuffer[5] = (byte)(send_bit_num & 0xFF);
+            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
+            outBuffer[1] = 0x35;        //0x81 is the "Get Pushbutton State" command in the firmware
+            outBuffer[2] = (byte)((frequency >> 8) & 0xFF);
+            outBuffer[3] = (byte)(frequency & 0xFF);
+            outBuffer[4] = (byte)((send_bit_num >> 8) & 0xFF);
+            outBuffer[5] = (byte)(send_bit_num & 0xFF);
 
-            //To get the pushbutton state, first, we send a packet with our "Get Pushbutton State" command in it.
-            if (!WriteFile(outbuffer, 65, ref BytesWritten, IntPtr.Zero)) //Blocking function, unless an "overlapped" structure is used
-                throw new UsbIrException("on sending data");
-
-            //Now get the response packet from the firmware.
-            inbuffer[0] = 0;
-            if (!ReadFileManagedBuffer(inbuffer, 65, ref BytesRead, IntPtr.Zero)) //Blocking function, unless an "overlapped" structure is used
+            if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
                 throw new UsbIrException("on sending data");
 
             //INBuffer[0] is the report ID, which we don't care about.
             //INBuffer[1] is an echo back of the command (see microcontroller firmware).
             //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-            if (inbuffer[1] == 0x35 && inbuffer[2] == 0x00)
+            if (inBuffer[1] == 0x35 && inBuffer[2] == 0x00)
                 return;
             throw new UsbIrException("on sending data");
         }
@@ -331,6 +302,17 @@ namespace UsbIr
         {
             this.HandleToUSBDevice.Close();
         }
+
+        private bool WriteAndRead(byte[] outBuffer, uint numberOfBytesToWrite, byte[] inBuffer, uint numberOfBytesToRead)
+        {
+            uint written = 0;
+            inBuffer[0] = 0;
+
+            return
+                this.WriteFile(outBuffer, numberOfBytesToWrite, ref written, IntPtr.Zero)
+                && this.ReadFileManagedBuffer(inBuffer, numberOfBytesToRead, ref written, IntPtr.Zero);
+        }
+
         private bool WriteFile(byte[] lpBuffer, uint nNumberOfBytesToWrite, ref uint lpNumberOfBytesWritten, IntPtr lpOverlapped)
             => NativeMethods.WriteFile(this.HandleToUSBDevice, lpBuffer, nNumberOfBytesToWrite, ref lpNumberOfBytesWritten, lpOverlapped);
         private bool ReadFileManagedBuffer(byte[] INBuffer, uint nNumberOfBytesToRead, ref uint lpNumberOfBytesRead, IntPtr lpOverlapped)
