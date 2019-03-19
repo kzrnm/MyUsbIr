@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.IO.Compression;
 
 namespace UsbIrRunner
 {
@@ -14,8 +15,8 @@ namespace UsbIrRunner
             if (args.Length < 1)
             {
                 Console.Error.WriteLine("引数が足りません");
-                Console.WriteLine("usage: UsbIrRunner.exe <--file> filepath [<-f|--freq> frequency] [-g|--gzip]");
-                Console.WriteLine("usage: UsbIrRunner.exe <-b|--base64> base64String [<-f|--freq> frequency] [-g|--gzip]");
+                Console.WriteLine("usage: UsbIrRunner.exe <--file> filepath [<-f|--freq> frequency] [-g|--gzip] [-d|--deflate]");
+                Console.WriteLine("usage: UsbIrRunner.exe <-b|--base64> base64String [<-f|--freq> frequency] [-g|--gzip] [-d|--deflate]");
                 return 1;
             }
 
@@ -25,6 +26,7 @@ namespace UsbIrRunner
                 string base64String = null;
                 string filePath = null;
                 bool isGzip = false;
+                bool isDeflate = false;
                 for (var i = 0; i < args.Length; i++)
                 {
                     var arg = args[i];
@@ -71,6 +73,16 @@ namespace UsbIrRunner
                     {
                         isGzip = true;
                     }
+                    else if (arg == "-d" || arg == "--deflate")
+                    {
+                        isDeflate = true;
+                    }
+                }
+
+                if (isGzip && isDeflate)
+                {
+                    Console.Error.WriteLine("<-g|--gzip>と<-d|--deflate>は同時には使用できません");
+                    return 2;
                 }
 
                 if ((filePath != null && base64String != null) || (filePath == null && base64String == null))
@@ -82,16 +94,25 @@ namespace UsbIrRunner
 
                 var bytes = GetBytes(filePath, base64String);
 
-                if (isGzip)
+                if (isGzip || isDeflate)
                 {
-                    using (var ms = new MemoryStream(bytes))
-                    using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress))
+                    using (var ms = new MemoryStream())
                     {
-                        var buffer = new byte[9600];
-                        var readSize = gz.Read(buffer, 0, buffer.Length);
-
-                        bytes = new byte[readSize];
-                        Array.Copy(buffer, 0, bytes, 0, readSize);
+                        Stream decompressStream;
+                        if (isGzip)
+                        {
+                            decompressStream = new GZipStream(ms, CompressionMode.Decompress);
+                        }
+                        else if (isDeflate)
+                        {
+                            decompressStream = new DeflateStream(ms, CompressionMode.Decompress);
+                        }
+                        else
+                        {
+                            throw new ArgumentException();
+                        }
+                        using (decompressStream)
+                            bytes = Decompress(decompressStream);
                     }
                 }
 
@@ -107,6 +128,14 @@ namespace UsbIrRunner
             }
         }
 
+        static byte[] Decompress(Stream decompressStream)
+        {
+            var buffer = new byte[9600];
+            int readSize = decompressStream.Read(buffer, 0, buffer.Length);
+            var result = new byte[readSize];
+            Array.Copy(buffer, 0, result, 0, readSize);
+            return result;
+        }
         static byte[] GetBytes(string filePath, string base64String)
         {
             if (filePath != null)
