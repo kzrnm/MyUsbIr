@@ -115,6 +115,12 @@ namespace UsbIrRunner
                             bytes = Decompress(decompressStream);
                     }
                 }
+                else if (filePath?.EndsWith(".gz") == true)
+                {
+                    using (var ms = new MemoryStream())
+                    using (var decompressStream = new GZipStream(ms, CompressionMode.Decompress))
+                        bytes = Decompress(decompressStream);
+                }
 
                 using (var usbIr = new UsbIr.UsbIr())
                     usbIr.Send(bytes, frequency);
