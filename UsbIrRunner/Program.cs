@@ -12,6 +12,10 @@ namespace UsbIrRunner
     {
         static int Main(string[] args)
         {
+            args = new[]
+            {
+                "-d","-b", "Y6hlOMEgyeCNhGEQnxg6RFeLrgddLapZRgwMAA==",
+            };
             if (args.Length < 1)
             {
                 Console.Error.WriteLine("引数が足りません");
@@ -96,7 +100,7 @@ namespace UsbIrRunner
 
                 if (isGzip || isDeflate)
                 {
-                    using (var ms = new MemoryStream())
+                    using (var ms = new MemoryStream(bytes))
                     {
                         Stream decompressStream;
                         if (isGzip)
@@ -117,7 +121,7 @@ namespace UsbIrRunner
                 }
                 else if (filePath?.EndsWith(".gz") == true)
                 {
-                    using (var ms = new MemoryStream())
+                    using (var ms = new MemoryStream(bytes))
                     using (var decompressStream = new GZipStream(ms, CompressionMode.Decompress))
                         bytes = Decompress(decompressStream);
                 }
