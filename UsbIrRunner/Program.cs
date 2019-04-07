@@ -12,10 +12,6 @@ namespace UsbIrRunner
     {
         static int Main(string[] args)
         {
-            args = new[]
-            {
-                "-d","-b", "Y6hlOMEgyeCNhGEQnxg6RFeLrgddLapZRgwMAA==",
-            };
             if (args.Length < 1)
             {
                 Console.Error.WriteLine("引数が足りません");
