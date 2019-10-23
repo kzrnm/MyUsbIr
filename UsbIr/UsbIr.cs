@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using static UsbIr.NativeMethods;
 using System.Linq;
 
+#pragma warning disable CA1031
+
 namespace UsbIr
 {
     public class UsbIr : IDisposable

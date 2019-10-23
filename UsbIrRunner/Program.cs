@@ -92,7 +92,7 @@ namespace UsbIrRunner
                 }
 
 
-                var bytes = GetBytes(filePath, base64String);
+                var bytes = GetBytesEither(filePath, base64String);
 
                 if (isGzip || isDeflate)
                 {
@@ -142,7 +142,7 @@ namespace UsbIrRunner
             Array.Copy(buffer, 0, result, 0, readSize);
             return result;
         }
-        static byte[] GetBytes(string filePath, string base64String)
+        static byte[] GetBytesEither(string filePath, string base64String)
         {
             if (filePath != null)
             {

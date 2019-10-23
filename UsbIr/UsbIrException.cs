@@ -2,6 +2,7 @@
 
 namespace UsbIr
 {
+    [Serializable]
     public class UsbIrException : Exception
     {
         public UsbIrException() { }
