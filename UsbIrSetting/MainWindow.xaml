@@ -97,7 +97,7 @@
                     <Setter Property="FontSize" Value="20"/>
                 </Style>
             </StackPanel.Resources>
-            <TextBlock Text="Base64(GZip)"/>
+            <TextBlock Text="Base64"/>
             <TextBox Text="{Binding Base64String, Mode=OneWay}"/>
             <TextBlock Text="Base64(GZip)"/>
             <TextBox Text="{Binding Base64GZipString, Mode=OneWay}"/>
