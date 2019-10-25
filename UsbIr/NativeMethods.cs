@@ -46,7 +46,7 @@ namespace UsbIr
         //HDEVINFO as in input parameter for calling many of the other SetupDixxx() functions.
         [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         internal static extern IntPtr SetupDiGetClassDevs(
-            ref Guid ClassGuid,     //LPGUID    Input: Need to supply the class GUID. 
+            in Guid ClassGuid,     //LPGUID    Input: Need to supply the class GUID. 
             IntPtr Enumerator,      //PCTSTR    Input: Use NULL here, not important for our purposes
             IntPtr hwndParent,      //HWND      Input: Use NULL here, not important for our purposes
             uint Flags);            //DWORD     Input: Flags describing what kind of filtering to use.
@@ -57,7 +57,7 @@ namespace UsbIr
         internal static extern bool SetupDiEnumDeviceInterfaces(
             IntPtr DeviceInfoSet,           //Input: Give it the HDEVINFO we got from SetupDiGetClassDevs()
             IntPtr DeviceInfoData,          //Input (optional)
-            ref Guid InterfaceClassGuid,    //Input 
+            in Guid InterfaceClassGuid,    //Input 
             uint MemberIndex,               //Input: "Index" of the device you are interested in getting the path for.
             ref SP_DEVICE_INTERFACE_DATA DeviceInterfaceData);    //Output: This function fills in an "SP_DEVICE_INTERFACE_DATA" structure.
 
@@ -128,9 +128,9 @@ namespace UsbIr
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         internal static extern bool WriteFile(
             SafeFileHandle hFile,
-            byte[] lpBuffer,
+            in byte lpBuffer,
             uint nNumberOfBytesToWrite,
-            ref uint lpNumberOfBytesWritten,
+            out uint lpNumberOfBytesWritten,
             IntPtr lpOverlapped);
 
         //Uses a handle (created with CreateFile()), and lets us read USB data from the device.
@@ -139,7 +139,7 @@ namespace UsbIr
             SafeFileHandle hFile,
             IntPtr lpBuffer,
             uint nNumberOfBytesToRead,
-            ref uint lpNumberOfBytesRead,
+            out uint lpNumberOfBytesRead,
             IntPtr lpOverlapped);
     }
 }

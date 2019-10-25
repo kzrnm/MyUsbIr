@@ -7,7 +7,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "UsbIrRunner", "UsbIrRunner\
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "UsbIr", "UsbIr\UsbIr.csproj", "{5B235F27-C6A4-407D-B180-7F36E4DC6930}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UsbIrSetting", "UsbIrSetting\UsbIrSetting.csproj", "{AC06F2B1-4922-4E3B-8B67-DB109A47A2A3}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "UsbIrSetting", "UsbIrSetting\UsbIrSetting.csproj", "{AC06F2B1-4922-4E3B-8B67-DB109A47A2A3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

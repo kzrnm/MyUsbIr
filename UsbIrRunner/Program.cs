@@ -93,33 +93,17 @@ namespace UsbIrRunner
 
 
                 var bytes = GetBytesEither(filePath, base64String);
-
-                if (isGzip || isDeflate)
+                if (isGzip || filePath?.EndsWith(".gz") == true)
                 {
-                    using (var ms = new MemoryStream(bytes))
-                    {
-                        Stream decompressStream;
-                        if (isGzip)
-                        {
-                            decompressStream = new GZipStream(ms, CompressionMode.Decompress);
-                        }
-                        else if (isDeflate)
-                        {
-                            decompressStream = new DeflateStream(ms, CompressionMode.Decompress);
-                        }
-                        else
-                        {
-                            throw new ArgumentException();
-                        }
-                        using (decompressStream)
-                            bytes = Decompress(decompressStream);
-                    }
+                    using var ms = new MemoryStream(bytes);
+                    using var decompressStream = new GZipStream(ms, CompressionMode.Decompress);
+                    bytes = Decompress(decompressStream);
                 }
-                else if (filePath?.EndsWith(".gz") == true)
+                else if (isDeflate)
                 {
-                    using (var ms = new MemoryStream(bytes))
-                    using (var decompressStream = new GZipStream(ms, CompressionMode.Decompress))
-                        bytes = Decompress(decompressStream);
+                    using var ms = new MemoryStream(bytes);
+                    using var decompressStream = new DeflateStream(ms, CompressionMode.Decompress);
+                    bytes = Decompress(decompressStream);
                 }
 
                 using (var usbIr = new UsbIr.UsbIr())
@@ -136,11 +120,9 @@ namespace UsbIrRunner
 
         static byte[] Decompress(Stream decompressStream)
         {
-            var buffer = new byte[9600];
-            int readSize = decompressStream.Read(buffer, 0, buffer.Length);
-            var result = new byte[readSize];
-            Array.Copy(buffer, 0, result, 0, readSize);
-            return result;
+            Span<byte> buffer = stackalloc byte[9600];
+            int readSize = decompressStream.Read(buffer);
+            return buffer.Slice(0, readSize).ToArray();
         }
         static byte[] GetBytesEither(string filePath, string base64String)
         {

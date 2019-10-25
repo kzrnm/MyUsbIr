@@ -14,8 +14,277 @@ namespace UsbIr
 {
     public class UsbIr : IDisposable
     {
-        private SafeFileHandle HandleToUSBDevice { get; }
+        private readonly SafeFileHandle handleToUSBDevice;
 
+        public UsbIr() : this(IntPtr.Zero) { }
+        public UsbIr(IntPtr hRecipient)
+        {
+            //Register for WM_DEVICECHANGE notifications.  This code uses these messages to detect plug and play connection/disconnection events for USB devices
+            DEV_BROADCAST_DEVICEINTERFACE deviceBroadcastHeader = new DEV_BROADCAST_DEVICEINTERFACE
+            {
+                dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE,
+                dbcc_reserved = 0,  //Reserved says not to use...
+                dbcc_classguid = InterfaceClassGuid
+            };
+            deviceBroadcastHeader.dbcc_size = (uint)Marshal.SizeOf(deviceBroadcastHeader);
+
+            //Need to get the address of the DeviceBroadcastHeader to call RegisterDeviceNotification(), but
+            //can't use "&DeviceBroadcastHeader".  Instead, using a roundabout means to get the address by 
+            //making a duplicate copy using Marshal.StructureToPtr().
+            IntPtr pDeviceBroadcastHeader = Marshal.AllocHGlobal(Marshal.SizeOf(deviceBroadcastHeader)); //allocate memory for a new DEV_BROADCAST_DEVICEINTERFACE structure, and return the address 
+            Marshal.StructureToPtr(deviceBroadcastHeader, pDeviceBroadcastHeader, false);  //Copies the DeviceBroadcastHeader structure into the memory already allocated at DeviceBroadcastHeaderWithPointer
+            RegisterDeviceNotification(hRecipient, pDeviceBroadcastHeader, DEVICE_NOTIFY_WINDOW_HANDLE);
+            //RegisterDeviceNotification(this.Handle, pDeviceBroadcastHeader, DEVICE_NOTIFY_WINDOW_HANDLE);
+
+            //Now make an initial attempt to find the USB device, if it was already connected to the PC and enumerated prior to launching the application.
+            //If it is connected and present, we should open read and write handles to the device so we can communicate with it later.
+            //If it was not connected, we will have to wait until the user plugs the device in, and the WM_DEVICECHANGE callback function can process
+            //the message and again search for the device.
+            if (CheckIfPresentAndGetUSBDevicePath())    //Check and make sure at least one device with matching VID/PID is attached
+            {
+                uint ErrorStatusWrite;
+
+                //We now have the proper device path, and we can finally open read and write handles to the device.
+                this.handleToUSBDevice = CreateFile(DevicePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+                ErrorStatusWrite = (uint)Marshal.GetLastWin32Error();
+
+                if (ErrorStatusWrite == ERROR_SUCCESS && this.handleToUSBDevice != null)
+                {
+                    return;
+                }
+                else //for some reason the device was physically plugged in, but one or both of the read/write handles didn't open successfully...
+                {
+                    throw new UsbIrException("cannot open USB device");
+                }
+            }
+            else    //Device must not be connected (or not programmed with correct firmware)
+            {
+                throw new UsbIrException("Device must not be connected (or not programmed with correct firmware)");
+            }
+        }
+
+        #region Rec & Read
+
+        public RecStatus RecStatus { set; get; }
+
+        public void StartRecoding(uint frequency = 38000)
+        {
+            this.RecStatus = RecStatus.NowRecoding;
+
+            Span<byte> outBuffer = stackalloc byte[65];
+            Span<byte> inBuffer = stackalloc byte[65];
+
+            outBuffer[0] = 0;         //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
+            outBuffer[1] = 0x31;        //0x81 is the "Get Pushbutton State" command in the firmware
+            outBuffer[2] = (byte)((frequency >> 8) & 0xFF);
+            outBuffer[3] = (byte)(frequency & 0xFF);
+            outBuffer[4] = 1;   // 読み込み停止フラグ
+            outBuffer[5] = 0;   // 読み込み停止ON時間MSB
+            outBuffer[6] = 0;   // 読み込み停止ON時間LSB
+            outBuffer[7] = 10;   // 読み込み停止OFF時間MSB
+            outBuffer[8] = 0;   // 読み込み停止OFF時間LSB
+
+            if (!this.WriteAndRead(outBuffer, inBuffer))
+                throw new UsbIrException("cannot start recoding");
+
+            //INBuffer[0] is the report ID, which we don't care about.
+            //INBuffer[1] is an echo back of the command (see microcontroller firmware).
+            //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
+            if (inBuffer[1] != 0x31)
+            {
+                throw new UsbIrException("cannot start recoding");
+            }
+        }
+        public void EndRecoding()
+        {
+            Span<byte> outBuffer = stackalloc byte[65];
+            Span<byte> inBuffer = stackalloc byte[65];
+
+            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
+            outBuffer[1] = 0x32;        //0x81 is the "Get Pushbutton State" command in the firmware
+
+            if (!this.WriteAndRead(outBuffer, inBuffer))
+                throw new UsbIrException("cannot end recoding");
+
+            //INBuffer[0] is the report ID, which we don't care about.
+            //INBuffer[1] is an echo back of the command (see microcontroller firmware).
+            //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
+            if (inBuffer[1] != 0x32 || inBuffer[2] != 0)
+                throw new UsbIrException("cannot end recoding");
+
+            this.RecStatus = RecStatus.Complete;
+        }
+        public byte[] Read()
+        {
+            if (this.RecStatus != RecStatus.Complete)
+                throw new InvalidOperationException();
+
+            Span<byte> outBuffer = stackalloc byte[65];
+            Span<byte> inBuffer = stackalloc byte[65];
+
+            Span<byte> resultBuffer = stackalloc byte[9600];
+            Span<byte> resultCurrent = resultBuffer;
+
+            //Get the pushbutton state from the microcontroller firmware.
+            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
+            outBuffer[1] = 0x33;        //0x81 is the "Get Pushbutton State" command in the firmware
+
+            while (true)
+            {
+                if (!this.WriteAndRead(outBuffer, inBuffer))
+                    throw new UsbIrException("cannot read");
+
+                //INBuffer[0] is the report ID, which we don't care about.
+                //INBuffer[1] is an echo back of the command (see microcontroller firmware).
+                //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
+                if (inBuffer[1] != 0x33)
+                    throw new UsbIrException("cannot read");
+
+                int totalSize = (inBuffer[2] << 8) | inBuffer[3];
+                int startPosition = (inBuffer[4] << 8) | inBuffer[5];
+                byte readSize = inBuffer[6];
+
+                if (totalSize > 0 && totalSize >= (startPosition + readSize) && readSize > 0)
+                {
+                    inBuffer.Slice(7, 4 * readSize).CopyTo(resultCurrent);
+                    resultCurrent = resultCurrent.Slice(4 * readSize);
+                }
+                else
+                {
+                    // 読み込み終了
+                    return resultBuffer.Slice(0, totalSize * 4).ToArray();
+                }
+            }
+        }
+        #endregion Rec & Read
+
+        public void Send(ReadOnlySpan<byte> data, uint frequency = 38000)
+        {
+            Span<byte> outBuffer = stackalloc byte[65];
+            Span<byte> inBuffer = stackalloc byte[65];
+            int send_bit_num = data.Length / 4;            // 送信ビット数　リーダーコード + コード + 終了コード
+            int send_bit_pos = 0;                  // 送信セット済みビット位置
+            int set_bit_size;
+
+            if (!(IR_FREQ_MIN <= frequency && frequency <= IR_FREQ_MAX))
+            {
+                throw new ArgumentOutOfRangeException(nameof(frequency));
+            }
+
+            // データセット
+            while (true)
+            {
+                if (send_bit_num > send_bit_pos)
+                {
+                    set_bit_size = send_bit_num - send_bit_pos;
+                    if (set_bit_size > IR_SEND_DATA_USB_SEND_MAX_LEN)
+                    {
+                        set_bit_size = IR_SEND_DATA_USB_SEND_MAX_LEN;
+                    }
+                }
+                else
+                {   // 送信データなし
+                    break;
+                }
+
+                outBuffer[0] = 0x00;
+                outBuffer[1] = 0x34;
+                //送信総ビット数
+                outBuffer[2] = (byte)((send_bit_num >> 8) & 0xFF);
+                outBuffer[3] = (byte)(send_bit_num & 0xFF);
+                outBuffer[4] = (byte)((send_bit_pos >> 8) & 0xFF);
+                outBuffer[5] = (byte)(send_bit_pos & 0xFF);
+                outBuffer[6] = (byte)(set_bit_size & 0xFF);
+
+                // データセット
+                // 赤外線コードコピー
+                data.Slice(send_bit_pos * 4, set_bit_size * 4).CopyTo(outBuffer.Slice(7));
+                send_bit_pos += set_bit_size;
+
+                if (!WriteFile(outBuffer))
+                    throw new UsbIrException("on setting data");
+
+                //Now get the response packet from the firmware.
+                inBuffer[0] = 0;
+
+
+                if (!ReadFileManagedBuffer(inBuffer))
+                    throw new UsbIrException("on setting data");
+
+                //INBuffer[0] is the report ID, which we don't care about.
+                //INBuffer[1] is an echo back of the command (see microcontroller firmware).
+                //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
+                if (inBuffer[1] == 0x34 && inBuffer[2] != 0x00)
+                    throw new UsbIrException("on setting data");
+            }
+
+            // データ送信要求セット
+            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
+            outBuffer[1] = 0x35;        //0x81 is the "Get Pushbutton State" command in the firmware
+            outBuffer[2] = (byte)((frequency >> 8) & 0xFF);
+            outBuffer[3] = (byte)(frequency & 0xFF);
+            outBuffer[4] = (byte)((send_bit_num >> 8) & 0xFF);
+            outBuffer[5] = (byte)(send_bit_num & 0xFF);
+
+            if (!this.WriteAndRead(outBuffer, inBuffer))
+                throw new UsbIrException("on sending data");
+
+            //INBuffer[0] is the report ID, which we don't care about.
+            //INBuffer[1] is an echo back of the command (see microcontroller firmware).
+            //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
+            if (inBuffer[1] == 0x35 && inBuffer[2] == 0x00)
+                return;
+            throw new UsbIrException("on sending data");
+        }
+
+        private bool disposed = false;
+        public void Dispose()
+        {
+            this.Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposed)
+                return;
+
+            if (disposing)
+            {
+                this.handleToUSBDevice.Dispose();
+            }
+
+            disposed = true;
+        }
+
+        private bool WriteAndRead(ReadOnlySpan<byte> outBuffer, Span<byte> inBuffer)
+        {
+            inBuffer[0] = 0;
+
+            return
+                this.WriteFile(outBuffer)
+                && this.ReadFileManagedBuffer(inBuffer);
+        }
+
+        private bool WriteFile(ReadOnlySpan<byte> lpBuffer) => WriteFile(lpBuffer, IntPtr.Zero);
+        private bool WriteFile(ReadOnlySpan<byte> lpBuffer, IntPtr lpOverlapped)
+            => NativeMethods.WriteFile(this.handleToUSBDevice, MemoryMarshal.GetReference(lpBuffer), (uint)lpBuffer.Length, out _, lpOverlapped);
+        private bool ReadFileManagedBuffer(Span<byte> inBuffer)
+            => ReadFileManagedBuffer(inBuffer, IntPtr.Zero);
+        private bool ReadFileManagedBuffer(Span<byte> inBuffer, IntPtr lpOverlapped)
+        {
+            try
+            {
+                unsafe
+                {
+                    fixed (byte* pointer = inBuffer)
+                        if (ReadFile(this.handleToUSBDevice, (IntPtr)pointer, (uint)inBuffer.Length, out _, lpOverlapped))
+                            return true;
+                }
+            }
+            catch { }
+            return false;
+        }
 
         #region constants
         ////--------------- Global Varibles Section ------------------
@@ -54,299 +323,9 @@ namespace UsbIr
 
         public const uint IR_FREQ_MIN = 25000;                  // 赤外線周波数設定最小値 25KHz
         public const uint IR_FREQ_MAX = 50000;                  // 赤外線周波数設定最大値 50KHz
-        public const uint IR_SEND_DATA_USB_SEND_MAX_LEN = 14;   // USB送信１回で送信する最大ビット数
+        public const int IR_SEND_DATA_USB_SEND_MAX_LEN = 14;   // USB送信１回で送信する最大ビット数
         public const uint IR_SEND_DATA_MAX_LEN = 300;           // 赤外線送信データ設定最大長[byte]
         #endregion constants
-        public UsbIr() : this(IntPtr.Zero) { }
-        public UsbIr(IntPtr hRecipient)
-        {
-            //Register for WM_DEVICECHANGE notifications.  This code uses these messages to detect plug and play connection/disconnection events for USB devices
-            DEV_BROADCAST_DEVICEINTERFACE deviceBroadcastHeader = new DEV_BROADCAST_DEVICEINTERFACE
-            {
-                dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE,
-                dbcc_reserved = 0,  //Reserved says not to use...
-                dbcc_classguid = InterfaceClassGuid
-            };
-            deviceBroadcastHeader.dbcc_size = (uint)Marshal.SizeOf(deviceBroadcastHeader);
-
-            //Need to get the address of the DeviceBroadcastHeader to call RegisterDeviceNotification(), but
-            //can't use "&DeviceBroadcastHeader".  Instead, using a roundabout means to get the address by 
-            //making a duplicate copy using Marshal.StructureToPtr().
-            IntPtr pDeviceBroadcastHeader = Marshal.AllocHGlobal(Marshal.SizeOf(deviceBroadcastHeader)); //allocate memory for a new DEV_BROADCAST_DEVICEINTERFACE structure, and return the address 
-            Marshal.StructureToPtr(deviceBroadcastHeader, pDeviceBroadcastHeader, false);  //Copies the DeviceBroadcastHeader structure into the memory already allocated at DeviceBroadcastHeaderWithPointer
-            RegisterDeviceNotification(hRecipient, pDeviceBroadcastHeader, DEVICE_NOTIFY_WINDOW_HANDLE);
-            //RegisterDeviceNotification(this.Handle, pDeviceBroadcastHeader, DEVICE_NOTIFY_WINDOW_HANDLE);
-
-            //Now make an initial attempt to find the USB device, if it was already connected to the PC and enumerated prior to launching the application.
-            //If it is connected and present, we should open read and write handles to the device so we can communicate with it later.
-            //If it was not connected, we will have to wait until the user plugs the device in, and the WM_DEVICECHANGE callback function can process
-            //the message and again search for the device.
-            if (CheckIfPresentAndGetUSBDevicePath())    //Check and make sure at least one device with matching VID/PID is attached
-            {
-                uint ErrorStatusWrite;
-
-                //We now have the proper device path, and we can finally open read and write handles to the device.
-                this.HandleToUSBDevice = CreateFile(DevicePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
-                ErrorStatusWrite = (uint)Marshal.GetLastWin32Error();
-
-                if (ErrorStatusWrite == ERROR_SUCCESS && this.HandleToUSBDevice != null)
-                {
-                    return;
-                }
-                else //for some reason the device was physically plugged in, but one or both of the read/write handles didn't open successfully...
-                {
-                    throw new UsbIrException("cannot open USB device");
-                }
-            }
-            else    //Device must not be connected (or not programmed with correct firmware)
-            {
-                throw new UsbIrException("Device must not be connected (or not programmed with correct firmware)");
-            }
-        }
-
-        #region Rec & Read
-
-        public RecStatus RecStatus { set; get; }
-
-        public void StartRecoding(uint frequency = 38000)
-        {
-            this.RecStatus = RecStatus.NowRecoding;
-
-            var outBuffer = new byte[65];
-            var inBuffer = new byte[65];
-
-            outBuffer[0] = 0;         //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
-            outBuffer[1] = 0x31;        //0x81 is the "Get Pushbutton State" command in the firmware
-            outBuffer[2] = (byte)((frequency >> 8) & 0xFF);
-            outBuffer[3] = (byte)(frequency & 0xFF);
-            outBuffer[4] = 1;   // 読み込み停止フラグ
-            outBuffer[5] = 0;   // 読み込み停止ON時間MSB
-            outBuffer[6] = 0;   // 読み込み停止ON時間LSB
-            outBuffer[7] = 10;   // 読み込み停止OFF時間MSB
-            outBuffer[8] = 0;   // 読み込み停止OFF時間LSB
-
-            if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
-                throw new UsbIrException("cannot start recoding");
-
-            //INBuffer[0] is the report ID, which we don't care about.
-            //INBuffer[1] is an echo back of the command (see microcontroller firmware).
-            //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-            if (inBuffer[1] != 0x31)
-            {
-                throw new UsbIrException("cannot start recoding");
-            }
-        }
-        public void EndRecoding()
-        {
-            var outBuffer = new byte[65];
-            var inBuffer = new byte[65];
-
-            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
-            outBuffer[1] = 0x32;        //0x81 is the "Get Pushbutton State" command in the firmware
-
-            if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
-                throw new UsbIrException("cannot end recoding");
-
-            //INBuffer[0] is the report ID, which we don't care about.
-            //INBuffer[1] is an echo back of the command (see microcontroller firmware).
-            //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-            if (inBuffer[1] != 0x32 || inBuffer[2] != 0)
-                throw new UsbIrException("cannot end recoding");
-
-            this.RecStatus = RecStatus.Complete;
-        }
-        public byte[] Read()
-        {
-            if (this.RecStatus != RecStatus.Complete)
-                throw new InvalidOperationException();
-
-            var outBuffer = new byte[65];
-            var inBuffer = new byte[65];
-
-            var resultBuffer = new byte[9600];
-            int resultBufferIndex = 0;
-
-            //Get the pushbutton state from the microcontroller firmware.
-            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
-            outBuffer[1] = 0x33;        //0x81 is the "Get Pushbutton State" command in the firmware
-
-            while (true)
-            {
-                if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
-                    throw new UsbIrException("cannot read");
-
-                //INBuffer[0] is the report ID, which we don't care about.
-                //INBuffer[1] is an echo back of the command (see microcontroller firmware).
-                //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-                if (inBuffer[1] != 0x33)
-                    throw new UsbIrException("cannot read");
-
-                int totalSize = (inBuffer[2] << 8) | inBuffer[3];
-                int startPosition = (inBuffer[4] << 8) | inBuffer[5];
-                byte readSize = inBuffer[6];
-
-
-                if (totalSize > 0 && totalSize >= (startPosition + readSize) && readSize > 0)
-                {
-                    for (int i = 0; i < readSize; i++)
-                    {
-                        var fi = 4 * i;
-                        resultBuffer[resultBufferIndex++] = inBuffer[7 + fi];
-                        resultBuffer[resultBufferIndex++] = inBuffer[8 + fi];
-                        resultBuffer[resultBufferIndex++] = inBuffer[9 + fi];
-                        resultBuffer[resultBufferIndex++] = inBuffer[10 + fi];
-                    }
-                }
-                else
-                {
-                    // 読み込み終了
-                    var result = new byte[totalSize * 4];
-                    Array.Copy(resultBuffer, result, result.Length);
-                    return result;
-                }
-            }
-        }
-        #endregion Rec & Read
-
-        public void Send(byte[] data, uint frequency = 38000)
-        {
-            byte[] outBuffer = new byte[65];
-            byte[] inBuffer = new byte[65];
-            uint BytesWritten = 0;
-            uint BytesRead = 0;
-            uint send_bit_num = (uint)data.Length / 4;            // 送信ビット数　リーダーコード + コード + 終了コード
-            uint send_bit_pos = 0;                  // 送信セット済みビット位置
-            uint set_bit_size;
-
-            if (!(IR_FREQ_MIN <= frequency && frequency <= IR_FREQ_MAX))
-            {
-                throw new ArgumentOutOfRangeException(nameof(frequency));
-            }
-
-            // データセット
-            while (true)
-            {
-                outBuffer[0] = 0x00;
-                outBuffer[1] = 0x34;
-                //送信総ビット数
-                outBuffer[2] = (byte)((send_bit_num >> 8) & 0xFF);
-                outBuffer[3] = (byte)(send_bit_num & 0xFF);
-                outBuffer[4] = (byte)((send_bit_pos >> 8) & 0xFF);
-                outBuffer[5] = (byte)(send_bit_pos & 0xFF);
-                if (send_bit_num > send_bit_pos)
-                {
-                    set_bit_size = send_bit_num - send_bit_pos;
-                    if (set_bit_size > IR_SEND_DATA_USB_SEND_MAX_LEN)
-                    {
-                        set_bit_size = IR_SEND_DATA_USB_SEND_MAX_LEN;
-                    }
-                }
-                else
-                {   // 送信データなし
-                    break;
-                }
-
-                outBuffer[6] = (byte)(set_bit_size & 0xFF);
-
-                // データセット
-                // 赤外線コードコピー
-                for (uint fi = 0; fi < set_bit_size; fi++)
-                {
-                    // ON Count
-                    outBuffer[7 + (fi * 4)] = data[send_bit_pos * 4];
-                    outBuffer[7 + (fi * 4) + 1] = data[(send_bit_pos * 4) + 1];
-                    // OFF Count
-                    outBuffer[7 + (fi * 4) + 2] = data[(send_bit_pos * 4) + 2];
-                    outBuffer[7 + (fi * 4) + 3] = data[(send_bit_pos * 4) + 3];
-                    send_bit_pos++;
-                }
-                if (!WriteFile(outBuffer, 65, ref BytesWritten, IntPtr.Zero))
-                    throw new UsbIrException("on setting data");
-
-                //Now get the response packet from the firmware.
-                inBuffer[0] = 0;
-
-
-                if (!ReadFileManagedBuffer(inBuffer, 65, ref BytesRead, IntPtr.Zero))
-                    throw new UsbIrException("on setting data");
-
-                //INBuffer[0] is the report ID, which we don't care about.
-                //INBuffer[1] is an echo back of the command (see microcontroller firmware).
-                //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-                if (inBuffer[1] == 0x34 && inBuffer[2] != 0x00)
-                    throw new UsbIrException("on setting data");
-            }
-
-
-
-
-
-            // データ送信要求セット
-            outBuffer[0] = 0;           //The first byte is the "Report ID" and does not get sent over the USB bus.  Always set = 0.
-            outBuffer[1] = 0x35;        //0x81 is the "Get Pushbutton State" command in the firmware
-            outBuffer[2] = (byte)((frequency >> 8) & 0xFF);
-            outBuffer[3] = (byte)(frequency & 0xFF);
-            outBuffer[4] = (byte)((send_bit_num >> 8) & 0xFF);
-            outBuffer[5] = (byte)(send_bit_num & 0xFF);
-
-            if (!this.WriteAndRead(outBuffer, 65, inBuffer, 65))
-                throw new UsbIrException("on sending data");
-
-            //INBuffer[0] is the report ID, which we don't care about.
-            //INBuffer[1] is an echo back of the command (see microcontroller firmware).
-            //INBuffer[2] contains the I/O port pin value for the pushbutton (see microcontroller firmware).  
-            if (inBuffer[1] == 0x35 && inBuffer[2] == 0x00)
-                return;
-            throw new UsbIrException("on sending data");
-        }
-
-        public void Dispose()
-        {
-            this.HandleToUSBDevice.Close();
-        }
-
-        private bool WriteAndRead(byte[] outBuffer, uint numberOfBytesToWrite, byte[] inBuffer, uint numberOfBytesToRead)
-        {
-            uint written = 0;
-            inBuffer[0] = 0;
-
-            return
-                this.WriteFile(outBuffer, numberOfBytesToWrite, ref written, IntPtr.Zero)
-                && this.ReadFileManagedBuffer(inBuffer, numberOfBytesToRead, ref written, IntPtr.Zero);
-        }
-
-        private bool WriteFile(byte[] lpBuffer, uint nNumberOfBytesToWrite, ref uint lpNumberOfBytesWritten, IntPtr lpOverlapped)
-            => NativeMethods.WriteFile(this.HandleToUSBDevice, lpBuffer, nNumberOfBytesToWrite, ref lpNumberOfBytesWritten, lpOverlapped);
-        private bool ReadFileManagedBuffer(byte[] INBuffer, uint nNumberOfBytesToRead, ref uint lpNumberOfBytesRead, IntPtr lpOverlapped)
-        {
-            IntPtr pINBuffer = IntPtr.Zero;
-
-            try
-            {
-                pINBuffer = Marshal.AllocHGlobal((int)nNumberOfBytesToRead);    //Allocate some unmanged RAM for the receive data buffer.
-
-                if (ReadFile(this.HandleToUSBDevice, pINBuffer, nNumberOfBytesToRead, ref lpNumberOfBytesRead, lpOverlapped))
-                {
-                    Marshal.Copy(pINBuffer, INBuffer, 0, (int)lpNumberOfBytesRead);    //Copy over the data from unmanged memory into the managed byte[] INBuffer
-                    Marshal.FreeHGlobal(pINBuffer);
-                    return true;
-                }
-                else
-                {
-                    Marshal.FreeHGlobal(pINBuffer);
-                    return false;
-                }
-
-            }
-            catch
-            {
-                if (pINBuffer != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(pINBuffer);
-                }
-                return false;
-            }
-        }
 
 
         //FUNCTION:	CheckIfPresentAndGetUSBDevicePath()
@@ -422,7 +401,7 @@ namespace UsbIr
 #endif
 
                 //First populate a list of plugged in devices (by specifying "DIGCF_PRESENT"), which are of the specified class GUID. 
-                DeviceInfoTable = SetupDiGetClassDevs(ref InterfaceClassGuid, IntPtr.Zero, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+                DeviceInfoTable = SetupDiGetClassDevs(InterfaceClassGuid, IntPtr.Zero, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
                 if (DeviceInfoTable != IntPtr.Zero)
                 {
@@ -430,7 +409,7 @@ namespace UsbIr
                     while (true)
                     {
                         InterfaceDataStructure.cbSize = (uint)Marshal.SizeOf(InterfaceDataStructure);
-                        if (SetupDiEnumDeviceInterfaces(DeviceInfoTable, IntPtr.Zero, ref InterfaceClassGuid, InterfaceIndex, ref InterfaceDataStructure))
+                        if (SetupDiEnumDeviceInterfaces(DeviceInfoTable, IntPtr.Zero, InterfaceClassGuid, InterfaceIndex, ref InterfaceDataStructure))
                         {
                             ErrorStatus = (uint)Marshal.GetLastWin32Error();
                             if (ErrorStatus == ERROR_NO_MORE_ITEMS) //Did we reach the end of the list of matching devices in the DeviceInfoTable?
