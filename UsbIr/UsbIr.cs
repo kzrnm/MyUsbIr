@@ -20,21 +20,13 @@ namespace UsbIr
         public UsbIr(IntPtr hRecipient)
         {
             //Register for WM_DEVICECHANGE notifications.  This code uses these messages to detect plug and play connection/disconnection events for USB devices
-            DEV_BROADCAST_DEVICEINTERFACE deviceBroadcastHeader = new DEV_BROADCAST_DEVICEINTERFACE
+            RegisterDeviceNotification(hRecipient, new DEV_BROADCAST_DEVICEINTERFACE
             {
                 dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE,
                 dbcc_reserved = 0,  //Reserved says not to use...
-                dbcc_classguid = InterfaceClassGuid
-            };
-            deviceBroadcastHeader.dbcc_size = (uint)Marshal.SizeOf(deviceBroadcastHeader);
-
-            //Need to get the address of the DeviceBroadcastHeader to call RegisterDeviceNotification(), but
-            //can't use "&DeviceBroadcastHeader".  Instead, using a roundabout means to get the address by 
-            //making a duplicate copy using Marshal.StructureToPtr().
-            IntPtr pDeviceBroadcastHeader = Marshal.AllocHGlobal(Marshal.SizeOf(deviceBroadcastHeader)); //allocate memory for a new DEV_BROADCAST_DEVICEINTERFACE structure, and return the address 
-            Marshal.StructureToPtr(deviceBroadcastHeader, pDeviceBroadcastHeader, false);  //Copies the DeviceBroadcastHeader structure into the memory already allocated at DeviceBroadcastHeaderWithPointer
-            RegisterDeviceNotification(hRecipient, pDeviceBroadcastHeader, DEVICE_NOTIFY_WINDOW_HANDLE);
-            //RegisterDeviceNotification(this.Handle, pDeviceBroadcastHeader, DEVICE_NOTIFY_WINDOW_HANDLE);
+                dbcc_classguid = InterfaceClassGuid,
+                dbcc_size = (uint)Marshal.SizeOf<DEV_BROADCAST_DEVICEINTERFACE>(),
+            }, DeviceNotify.WindowHandle);
 
             //Now make an initial attempt to find the USB device, if it was already connected to the PC and enumerated prior to launching the application.
             //If it is connected and present, we should open read and write handles to the device so we can communicate with it later.
@@ -45,7 +37,13 @@ namespace UsbIr
                 uint ErrorStatusWrite;
 
                 //We now have the proper device path, and we can finally open read and write handles to the device.
-                this.handleToUSBDevice = CreateFile(DevicePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+                this.handleToUSBDevice = CreateFile(DevicePath,
+                    EFileAccess.GenericRead | EFileAccess.GenericWrite,
+                    EFileShare.Read | EFileShare.Write,
+                    IntPtr.Zero,
+                    ECreationDisposition.OpenExisting,
+                    EFileAttributes.Normal,
+                    IntPtr.Zero);
                 ErrorStatusWrite = (uint)Marshal.GetLastWin32Error();
 
                 if (ErrorStatusWrite == ERROR_SUCCESS && this.handleToUSBDevice != null)
@@ -268,7 +266,7 @@ namespace UsbIr
 
         private bool WriteFile(ReadOnlySpan<byte> lpBuffer) => WriteFile(lpBuffer, IntPtr.Zero);
         private bool WriteFile(ReadOnlySpan<byte> lpBuffer, IntPtr lpOverlapped)
-            => NativeMethods.WriteFile(this.handleToUSBDevice, MemoryMarshal.GetReference(lpBuffer), (uint)lpBuffer.Length, out _, lpOverlapped);
+            => NativeMethods.WriteFile(this.handleToUSBDevice, MemoryMarshal.GetReference(lpBuffer), lpBuffer.Length, out _, lpOverlapped);
         private bool ReadFileManagedBuffer(Span<byte> inBuffer)
             => ReadFileManagedBuffer(inBuffer, IntPtr.Zero);
         private bool ReadFileManagedBuffer(Span<byte> inBuffer, IntPtr lpOverlapped)
@@ -278,7 +276,7 @@ namespace UsbIr
                 unsafe
                 {
                     fixed (byte* pointer = inBuffer)
-                        if (ReadFile(this.handleToUSBDevice, (IntPtr)pointer, (uint)inBuffer.Length, out _, lpOverlapped))
+                        if (ReadFile(this.handleToUSBDevice, (IntPtr)pointer, inBuffer.Length, out _, lpOverlapped))
                             return true;
                 }
             }
@@ -292,31 +290,11 @@ namespace UsbIr
         private static string DevicePath = null;   //Need the find the proper device path before you can open file handles.
 
         //Globally Unique Identifier (GUID) for HID class devices.  Windows uses GUIDs to identify things.
-        private static Guid InterfaceClassGuid = new Guid(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
+        private static readonly Guid InterfaceClassGuid = new Guid(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
         //--------------- End of Global Varibles ------------------
 
-        //Constant definitions from setupapi.h, which we aren't allowed to include directly since this is C#
-        private const uint DIGCF_PRESENT = 0x02;
-        private const uint DIGCF_DEVICEINTERFACE = 0x10;
-        ////Constants for CreateFile() and other file I/O functions
-        //internal const short FILE_ATTRIBUTE_NORMAL = 0x80;
-        //internal const short INVALID_HANDLE_VALUE = -1;
-        private const uint GENERIC_READ = 0x80000000;
-        private const uint GENERIC_WRITE = 0x40000000;
-        //internal const uint CREATE_NEW = 1;
-        //internal const uint CREATE_ALWAYS = 2;
-        private const uint OPEN_EXISTING = 3;
-        private const uint FILE_SHARE_READ = 0x00000001;
-        private const uint FILE_SHARE_WRITE = 0x00000002;
-        ////Constant definitions for certain WM_DEVICECHANGE messages
-        //internal const uint WM_DEVICECHANGE = 0x0219;
-        //internal const uint DBT_DEVICEARRIVAL = 0x8000;
-        //internal const uint DBT_DEVICEREMOVEPENDING = 0x8003;
-        //internal const uint DBT_DEVICEREMOVECOMPLETE = 0x8004;
-        //internal const uint DBT_CONFIGCHANGED = 0x0018;
         ////Other constant definitions
         private const uint DBT_DEVTYP_DEVICEINTERFACE = 0x05;
-        private const uint DEVICE_NOTIFY_WINDOW_HANDLE = 0x00;
         private const uint ERROR_SUCCESS = 0x00;
         private const uint ERROR_NO_MORE_ITEMS = 0x00000103;
         private const uint SPDRP_HARDWAREID = 0x00000001;
@@ -384,7 +362,6 @@ namespace UsbIr
                 uint dwRegType = 0;
                 uint dwRegSize = 0;
                 uint dwRegSize2 = 0;
-                uint StructureSize = 0;
                 IntPtr PropertyValueBuffer = IntPtr.Zero;
                 bool MatchFound = false;
                 uint ErrorStatus;
@@ -401,14 +378,15 @@ namespace UsbIr
 #endif
 
                 //First populate a list of plugged in devices (by specifying "DIGCF_PRESENT"), which are of the specified class GUID. 
-                DeviceInfoTable = SetupDiGetClassDevs(InterfaceClassGuid, IntPtr.Zero, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+                DeviceInfoTable = SetupDiGetClassDevs(InterfaceClassGuid, IntPtr.Zero, IntPtr.Zero,
+                    DiGetClassFlags.DIGCF_PRESENT | DiGetClassFlags.DIGCF_DEVICEINTERFACE);
 
                 if (DeviceInfoTable != IntPtr.Zero)
                 {
                     //Now look through the list we just populated.  We are trying to see if any of them match our device. 
                     while (true)
                     {
-                        InterfaceDataStructure.cbSize = (uint)Marshal.SizeOf(InterfaceDataStructure);
+                        InterfaceDataStructure.cbSize = Marshal.SizeOf(InterfaceDataStructure);
                         if (SetupDiEnumDeviceInterfaces(DeviceInfoTable, IntPtr.Zero, InterfaceClassGuid, InterfaceIndex, ref InterfaceDataStructure))
                         {
                             ErrorStatus = (uint)Marshal.GetLastWin32Error();
@@ -429,7 +407,7 @@ namespace UsbIr
                         //check to see if it is the correct device or not.
 
                         //Initialize an appropriate SP_DEVINFO_DATA structure.  We need this structure for SetupDiGetDeviceRegistryProperty().
-                        DevInfoData.cbSize = (uint)Marshal.SizeOf(DevInfoData);
+                        DevInfoData.cbSize = Marshal.SizeOf(DevInfoData);
                         SetupDiEnumDeviceInfo(DeviceInfoTable, InterfaceIndex, ref DevInfoData);
 
                         //First query for the size of the hardware ID, so we can know how big a buffer to allocate for the data.
@@ -474,21 +452,27 @@ namespace UsbIr
                             //We can get the path by calling SetupDiGetDeviceInterfaceDetail(), however, we have to call this function twice:  The first
                             //time to get the size of the required structure/buffer to hold the detailed interface data, then a second time to actually 
                             //get the structure (after we have allocated enough memory for the structure.)
-                            DetailedInterfaceDataStructure.cbSize = (uint)Marshal.SizeOf(DetailedInterfaceDataStructure);
+
                             //First call populates "StructureSize" with the correct value
-                            SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, ref InterfaceDataStructure, IntPtr.Zero, 0, ref StructureSize, IntPtr.Zero);
+                            SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, InterfaceDataStructure, IntPtr.Zero, 0, out var StructureSize, IntPtr.Zero);
+                         
+                            
+                            
+                            
                             //Need to call SetupDiGetDeviceInterfaceDetail() again, this time specifying a pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA buffer with the correct size of RAM allocated.
                             //First need to allocate the unmanaged buffer and get a pointer to it.
-                            IntPtr pUnmanagedDetailedInterfaceDataStructure = IntPtr.Zero;  //Declare a pointer.
-                            pUnmanagedDetailedInterfaceDataStructure = Marshal.AllocHGlobal((int)StructureSize);    //Reserve some unmanaged memory for the structure.
-                            DetailedInterfaceDataStructure.cbSize = 6; //Initialize the cbSize parameter (4 bytes for DWORD + 2 bytes for unicode null terminator)
+                            IntPtr pUnmanagedDetailedInterfaceDataStructure = Marshal.AllocHGlobal((int)StructureSize);    //Reserve some unmanaged memory for the structure.
+
+                            DetailedInterfaceDataStructure.cbSize = IntPtr.Size == 8 ? 8 : 6;
+                            //DetailedInterfaceDataStructure.cbSize = sizeof(int) + Marshal.SystemDefaultCharSize; //Initialize the cbSize parameter (4 bytes for DWORD + 2 bytes for unicode null terminator)
+
                             Marshal.StructureToPtr(DetailedInterfaceDataStructure, pUnmanagedDetailedInterfaceDataStructure, false); //Copy managed structure contents into the unmanaged memory buffer.
 
                             //Now call SetupDiGetDeviceInterfaceDetail() a second time to receive the device path in the structure at pUnmanagedDetailedInterfaceDataStructure.
-                            if (SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, ref InterfaceDataStructure, pUnmanagedDetailedInterfaceDataStructure, StructureSize, IntPtr.Zero, IntPtr.Zero))
+                            if (SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, InterfaceDataStructure, pUnmanagedDetailedInterfaceDataStructure, StructureSize, out _, IntPtr.Zero))
                             {
                                 //Need to extract the path information from the unmanaged "structure".  The path starts at (pUnmanagedDetailedInterfaceDataStructure + sizeof(DWORD)).
-                                IntPtr pToDevicePath = new IntPtr((uint)pUnmanagedDetailedInterfaceDataStructure.ToInt32() + 4);  //Add 4 to the pointer (to get the pointer to point to the path, instead of the DWORD cbSize parameter)
+                                IntPtr pToDevicePath = new IntPtr(pUnmanagedDetailedInterfaceDataStructure.ToInt64() + 4);  //Add 4 to the pointer (to get the pointer to point to the path, instead of the DWORD cbSize parameter)
                                 DevicePath = Marshal.PtrToStringUni(pToDevicePath); //Now copy the path information into the globally defined DevicePath String.
 
                                 //We now have the proper device path, and we can finally use the path to open I/O handle(s) to the device.
