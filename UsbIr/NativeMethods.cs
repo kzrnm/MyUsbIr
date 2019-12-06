@@ -307,7 +307,7 @@ namespace UsbIr
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         internal static extern bool ReadFile(
             SafeFileHandle hFile,
-            IntPtr lpBuffer,
+            ref byte lpBuffer,
             int nNumberOfBytesToRead,
             out int lpNumberOfBytesRead,
             IntPtr lpOverlapped);

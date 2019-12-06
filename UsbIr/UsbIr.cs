@@ -273,12 +273,8 @@ namespace UsbIr
         {
             try
             {
-                unsafe
-                {
-                    fixed (byte* pointer = inBuffer)
-                        if (ReadFile(this.handleToUSBDevice, (IntPtr)pointer, inBuffer.Length, out _, lpOverlapped))
-                            return true;
-                }
+                if (ReadFile(this.handleToUSBDevice, ref MemoryMarshal.GetReference(inBuffer), inBuffer.Length, out _, lpOverlapped))
+                    return true;
             }
             catch { }
             return false;
@@ -455,10 +451,10 @@ namespace UsbIr
 
                             //First call populates "StructureSize" with the correct value
                             SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, InterfaceDataStructure, IntPtr.Zero, 0, out var StructureSize, IntPtr.Zero);
-                         
-                            
-                            
-                            
+
+
+
+
                             //Need to call SetupDiGetDeviceInterfaceDetail() again, this time specifying a pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA buffer with the correct size of RAM allocated.
                             //First need to allocate the unmanaged buffer and get a pointer to it.
                             IntPtr pUnmanagedDetailedInterfaceDataStructure = Marshal.AllocHGlobal((int)StructureSize);    //Reserve some unmanaged memory for the structure.
