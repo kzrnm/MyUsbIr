@@ -356,8 +356,8 @@ namespace UsbIr
 
                 uint InterfaceIndex = 0;
                 uint dwRegType = 0;
-                uint dwRegSize = 0;
-                uint dwRegSize2 = 0;
+                int dwRegSize = 0;
+                int dwRegSize2 = 0;
                 IntPtr PropertyValueBuffer = IntPtr.Zero;
                 bool MatchFound = false;
                 uint ErrorStatus;
@@ -411,7 +411,7 @@ namespace UsbIr
 
                         //Allocate a buffer for the hardware ID.
                         //Should normally work, but could throw exception "OutOfMemoryException" if not enough resources available.
-                        PropertyValueBuffer = Marshal.AllocHGlobal((int)dwRegSize);
+                        PropertyValueBuffer = Marshal.AllocHGlobal(dwRegSize);
 
                         //Retrieve the hardware IDs for the current device we are looking at.  PropertyValueBuffer gets filled with a 
                         //REG_MULTI_SZ (array of null terminated strings).  To find a device, we only care about the very first string in the
@@ -457,7 +457,7 @@ namespace UsbIr
 
                             //Need to call SetupDiGetDeviceInterfaceDetail() again, this time specifying a pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA buffer with the correct size of RAM allocated.
                             //First need to allocate the unmanaged buffer and get a pointer to it.
-                            IntPtr pUnmanagedDetailedInterfaceDataStructure = Marshal.AllocHGlobal((int)StructureSize);    //Reserve some unmanaged memory for the structure.
+                            IntPtr pUnmanagedDetailedInterfaceDataStructure = Marshal.AllocHGlobal(StructureSize);    //Reserve some unmanaged memory for the structure.
 
                             DetailedInterfaceDataStructure.cbSize = IntPtr.Size == 8 ? 8 : 6;
                             //DetailedInterfaceDataStructure.cbSize = sizeof(int) + Marshal.SystemDefaultCharSize; //Initialize the cbSize parameter (4 bytes for DWORD + 2 bytes for unicode null terminator)

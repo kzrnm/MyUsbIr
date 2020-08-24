@@ -22,7 +22,7 @@ namespace UsbIr
         internal struct SP_DEVICE_INTERFACE_DETAIL_DATA
         {
             internal int cbSize;               //DWORD
-            internal char[] DevicePath;         //TCHAR array of any size
+            internal char DevicePath;          //TCHAR array of any size
         }
 
         internal struct SP_DEVINFO_DATA
@@ -84,8 +84,8 @@ namespace UsbIr
             uint Property,
             ref uint PropertyRegDataType,
             IntPtr PropertyBuffer,
-            uint PropertyBufferSize,
-            ref uint RequiredSize);
+            int PropertyBufferSize,
+            ref int RequiredSize);
 
         //SetupDiGetDeviceInterfaceDetail() gives us a device path, which is needed before CreateFile() can be used.
         [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -93,8 +93,8 @@ namespace UsbIr
             IntPtr DeviceInfoSet,                   //Input: Wants HDEVINFO which can be obtained from SetupDiGetClassDevs()
             in SP_DEVICE_INTERFACE_DATA DeviceInterfaceData,                    //Input: Pointer to an structure which defines the device interface.  
             IntPtr DeviceInterfaceDetailData,      //Output: Pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA structure, which will receive the device path.
-            uint DeviceInterfaceDetailDataSize,     //Input: Number of bytes to retrieve.
-            out uint RequiredSize,                  //Output (optional): The number of bytes needed to hold the entire struct 
+            int DeviceInterfaceDetailDataSize,     //Input: Number of bytes to retrieve.
+            out int RequiredSize,                  //Output (optional): The number of bytes needed to hold the entire struct 
             IntPtr DeviceInfoData);                 //Output (optional): Pointer to a SP_DEVINFO_DATA structure
 
 
