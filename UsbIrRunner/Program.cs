@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.IO.Compression;
+using UsbIr;
 
 namespace UsbIrRunner
 {
@@ -111,9 +112,10 @@ namespace UsbIrRunner
 
                 return 0;
             }
-            catch
+            catch(UsbIrException e)
             {
                 Console.Error.WriteLine("失敗しました");
+                Console.Error.WriteLine(e.Message);
                 return 255;
             }
         }
