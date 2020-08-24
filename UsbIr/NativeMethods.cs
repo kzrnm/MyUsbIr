@@ -92,6 +92,7 @@ namespace UsbIr
         internal static extern bool SetupDiGetDeviceInterfaceDetail(
             IntPtr DeviceInfoSet,                   //Input: Wants HDEVINFO which can be obtained from SetupDiGetClassDevs()
             in SP_DEVICE_INTERFACE_DATA DeviceInterfaceData,                    //Input: Pointer to an structure which defines the device interface.  
+            //SP_DEVICE_INTERFACE_DETAIL_DATA DeviceInterfaceDetailData,      //Output: Pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA structure, which will receive the device path.
             IntPtr DeviceInterfaceDetailData,      //Output: Pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA structure, which will receive the device path.
             int DeviceInterfaceDetailDataSize,     //Input: Number of bytes to retrieve.
             out int RequiredSize,                  //Output (optional): The number of bytes needed to hold the entire struct 

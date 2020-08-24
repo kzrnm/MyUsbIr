@@ -34,7 +34,7 @@ class Program
 
 ## 環境
 
-.NET Framework 3.5以上を想定しています
+.NET Framework 3.5以上を想定しています。.NET Core 3でも可
 
 ## 参考にしたもの
 
