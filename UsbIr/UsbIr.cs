@@ -7,6 +7,7 @@ using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using static UsbIr.NativeMethods;
 using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 
 #pragma warning disable CA1031
 
@@ -32,7 +33,7 @@ namespace UsbIr
             //If it is connected and present, we should open read and write handles to the device so we can communicate with it later.
             //If it was not connected, we will have to wait until the user plugs the device in, and the WM_DEVICECHANGE callback function can process
             //the message and again search for the device.
-            if (CheckIfPresentAndGetUSBDevicePath())    //Check and make sure at least one device with matching VID/PID is attached
+            if (CheckIfPresentAndGetUSBDevicePath(out var DevicePath))    //Check and make sure at least one device with matching VID/PID is attached
             {
                 uint ErrorStatusWrite;
 
@@ -282,9 +283,6 @@ namespace UsbIr
 
         #region constants
         ////--------------- Global Varibles Section ------------------
-        ////USB related variables that need to have wide scope.
-        private static string DevicePath = null;   //Need the find the proper device path before you can open file handles.
-
         //Globally Unique Identifier (GUID) for HID class devices.  Windows uses GUIDs to identify things.
         private static readonly Guid InterfaceClassGuid = new Guid(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
         //--------------- End of Global Varibles ------------------
@@ -308,7 +306,7 @@ namespace UsbIr
         //OUTPUT:	Returns BOOL.  TRUE when device with matching VID/PID found.  FALSE if device with VID/PID could not be found.
         //			When returns TRUE, the globally accessable "DetailedInterfaceDataStructure" will contain the device path
         //			to the USB device with the matching VID/PID.
-        private static bool CheckIfPresentAndGetUSBDevicePath()
+        private static bool CheckIfPresentAndGetUSBDevicePath([NotNullWhen(true)] out string? DevicePath)
         {
             /* 
             Before we can "connect" our application to our USB embedded device, we must first find the device.
@@ -351,7 +349,6 @@ namespace UsbIr
             {
                 IntPtr DeviceInfoTable = IntPtr.Zero;
                 SP_DEVICE_INTERFACE_DATA InterfaceDataStructure = new SP_DEVICE_INTERFACE_DATA();
-                SP_DEVICE_INTERFACE_DETAIL_DATA DetailedInterfaceDataStructure = new SP_DEVICE_INTERFACE_DETAIL_DATA();
                 SP_DEVINFO_DATA DevInfoData = new SP_DEVINFO_DATA();
 
                 uint InterfaceIndex = 0;
@@ -380,7 +377,7 @@ namespace UsbIr
                 if (DeviceInfoTable != IntPtr.Zero)
                 {
                     //Now look through the list we just populated.  We are trying to see if any of them match our device. 
-                    while (true)
+                    while (LoopCounter < 10000000)
                     {
                         InterfaceDataStructure.cbSize = Marshal.SizeOf(InterfaceDataStructure);
                         if (SetupDiEnumDeviceInterfaces(DeviceInfoTable, IntPtr.Zero, InterfaceClassGuid, InterfaceIndex, ref InterfaceDataStructure))
@@ -389,14 +386,14 @@ namespace UsbIr
                             if (ErrorStatus == ERROR_NO_MORE_ITEMS) //Did we reach the end of the list of matching devices in the DeviceInfoTable?
                             {   //Cound not find the device.  Must not have been attached.
                                 SetupDiDestroyDeviceInfoList(DeviceInfoTable);  //Clean up the old structure we no longer need.
-                                return false;
+                                break;
                             }
                         }
                         else    //Else some other kind of unknown error ocurred...
                         {
                             ErrorStatus = (uint)Marshal.GetLastWin32Error();
                             SetupDiDestroyDeviceInfoList(DeviceInfoTable);  //Clean up the old structure we no longer need.
-                            return false;
+                            break;
                         }
 
                         //Now retrieve the hardware ID from the registry.  The hardware ID contains the VID and PID, which we will then 
@@ -420,7 +417,7 @@ namespace UsbIr
                         SetupDiGetDeviceRegistryProperty(DeviceInfoTable, ref DevInfoData, SPDRP_HARDWAREID, ref dwRegType, PropertyValueBuffer, dwRegSize, ref dwRegSize2);
 
                         //Now check if the first string in the hardware ID matches the device ID of the USB device we are trying to find.
-                        String DeviceIDFromRegistry = Marshal.PtrToStringUni(PropertyValueBuffer); //Make a new string, fill it with the contents from the PropertyValueBuffer
+                        String DeviceIDFromRegistry = Marshal.PtrToStringAuto(PropertyValueBuffer); //Make a new string, fill it with the contents from the PropertyValueBuffer
 
                         Marshal.FreeHGlobal(PropertyValueBuffer);       //No longer need the PropertyValueBuffer, free the memory to prevent potential memory leaks
 
@@ -453,35 +450,32 @@ namespace UsbIr
                             SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, InterfaceDataStructure, IntPtr.Zero, 0, out var StructureSize, IntPtr.Zero);
 
 
-
-
                             //Need to call SetupDiGetDeviceInterfaceDetail() again, this time specifying a pointer to a SP_DEVICE_INTERFACE_DETAIL_DATA buffer with the correct size of RAM allocated.
                             //First need to allocate the unmanaged buffer and get a pointer to it.
                             IntPtr pUnmanagedDetailedInterfaceDataStructure = Marshal.AllocHGlobal(StructureSize);    //Reserve some unmanaged memory for the structure.
+                            Marshal.WriteInt32(pUnmanagedDetailedInterfaceDataStructure, IntPtr.Size == 8 ? 8 : 6);
 
-                            DetailedInterfaceDataStructure.cbSize = IntPtr.Size == 8 ? 8 : 6;
-                            //DetailedInterfaceDataStructure.cbSize = sizeof(int) + Marshal.SystemDefaultCharSize; //Initialize the cbSize parameter (4 bytes for DWORD + 2 bytes for unicode null terminator)
-
-                            Marshal.StructureToPtr(DetailedInterfaceDataStructure, pUnmanagedDetailedInterfaceDataStructure, false); //Copy managed structure contents into the unmanaged memory buffer.
-
-                            //Now call SetupDiGetDeviceInterfaceDetail() a second time to receive the device path in the structure at pUnmanagedDetailedInterfaceDataStructure.
-                            if (SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, InterfaceDataStructure, pUnmanagedDetailedInterfaceDataStructure, StructureSize, out _, IntPtr.Zero))
+                            try
                             {
-                                //Need to extract the path information from the unmanaged "structure".  The path starts at (pUnmanagedDetailedInterfaceDataStructure + sizeof(DWORD)).
-                                IntPtr pToDevicePath = new IntPtr(pUnmanagedDetailedInterfaceDataStructure.ToInt64() + 4);  //Add 4 to the pointer (to get the pointer to point to the path, instead of the DWORD cbSize parameter)
-                                DevicePath = Marshal.PtrToStringUni(pToDevicePath); //Now copy the path information into the globally defined DevicePath String.
+                                //Now call SetupDiGetDeviceInterfaceDetail() a second time to receive the device path in the structure at pUnmanagedDetailedInterfaceDataStructure.
+                                if (SetupDiGetDeviceInterfaceDetail(DeviceInfoTable, InterfaceDataStructure, pUnmanagedDetailedInterfaceDataStructure, StructureSize, out _, IntPtr.Zero))
+                                {
+                                    //Need to extract the path information from the unmanaged "structure".  The path starts at (pUnmanagedDetailedInterfaceDataStructure + sizeof(DWORD)).
+                                    IntPtr pToDevicePath = new IntPtr(pUnmanagedDetailedInterfaceDataStructure.ToInt64() + 4);  //Add 4 to the pointer (to get the pointer to point to the path, instead of the DWORD cbSize parameter)
+                                    DevicePath = Marshal.PtrToStringAuto(pToDevicePath); //Now copy the path information into the globally defined DevicePath String.
 
-                                //We now have the proper device path, and we can finally use the path to open I/O handle(s) to the device.
-                                SetupDiDestroyDeviceInfoList(DeviceInfoTable);  //Clean up the old structure we no longer need.
-                                Marshal.FreeHGlobal(pUnmanagedDetailedInterfaceDataStructure);  //No longer need this unmanaged SP_DEVICE_INTERFACE_DETAIL_DATA buffer.  We already extracted the path information.
-                                return true;    //Returning the device path in the global DevicePath String
+                                    return true;    //Returning the device path in the global DevicePath String
+                                }
+                                else //Some unknown failure occurred
+                                {
+                                    uint ErrorCode = (uint)Marshal.GetLastWin32Error();
+                                    break;
+                                }
                             }
-                            else //Some unknown failure occurred
+                            finally
                             {
-                                uint ErrorCode = (uint)Marshal.GetLastWin32Error();
                                 SetupDiDestroyDeviceInfoList(DeviceInfoTable);  //Clean up the old structure.
                                 Marshal.FreeHGlobal(pUnmanagedDetailedInterfaceDataStructure);  //No longer need this unmanaged SP_DEVICE_INTERFACE_DETAIL_DATA buffer.  We already extracted the path information.
-                                return false;
                             }
                         }
 
@@ -490,19 +484,15 @@ namespace UsbIr
                         //However, just in case some unexpected error occurs, keep track of the number of loops executed.
                         //If the number of loops exceeds a very large number, exit anyway, to prevent inadvertent infinite looping.
                         LoopCounter++;
-                        if (LoopCounter == 10000000)    //Surely there aren't more than 10 million devices attached to any forseeable PC...
-                        {
-                            return false;
-                        }
                     }//end of while(true)
                 }
-                return false;
             }//end of try
             catch
             {
                 //Something went wrong if PC gets here.  Maybe a Marshal.AllocHGlobal() failed due to insufficient resources or something.
-                return false;
             }
+            DevicePath = null;
+            return false;
         }
     }
 }

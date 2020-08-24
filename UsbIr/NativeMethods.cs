@@ -19,7 +19,7 @@ namespace UsbIr
 
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto, Pack = 1)]
-        internal struct SP_DEVICE_INTERFACE_DETAIL_DATA
+        private struct SP_DEVICE_INTERFACE_DETAIL_DATA
         {
             internal int cbSize;               //DWORD
             internal char DevicePath;          //TCHAR array of any size
