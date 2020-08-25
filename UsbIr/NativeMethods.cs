@@ -82,10 +82,10 @@ namespace UsbIr
             IntPtr DeviceInfoSet,
             ref SP_DEVINFO_DATA DeviceInfoData,
             uint Property,
-            ref uint PropertyRegDataType,
+            out uint PropertyRegDataType,
             IntPtr PropertyBuffer,
             int PropertyBufferSize,
-            ref int RequiredSize);
+            out int RequiredSize);
 
         //SetupDiGetDeviceInterfaceDetail() gives us a device path, which is needed before CreateFile() can be used.
         [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -312,5 +312,10 @@ namespace UsbIr
             int nNumberOfBytesToRead,
             out int lpNumberOfBytesRead,
             IntPtr lpOverlapped);
+
+
+        internal const int ERROR_SUCCESS = 0x00;
+        internal const int ERROR_NO_MORE_ITEMS = 0x00000103;
+        internal const uint SPDRP_HARDWAREID = 0x00000001;
     }
 }
