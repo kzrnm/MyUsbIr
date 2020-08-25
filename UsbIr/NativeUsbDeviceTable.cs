@@ -9,7 +9,7 @@ namespace UsbIr
     internal class NativeUsbDeviceTable : IDisposable
     {
 
-        private readonly IntPtr deviceInfoTable;
+        private IntPtr deviceInfoTable;
         public NativeUsbDeviceTable()
         {
             //First populate a list of plugged in devices (by specifying "DIGCF_PRESENT"), which are of the specified class GUID. 
@@ -24,6 +24,8 @@ namespace UsbIr
             if (disposed) return;
 
             SetupDiDestroyDeviceInfoList(deviceInfoTable);
+            deviceInfoTable = IntPtr.Zero;
+            disposed = true;
         }
 
         private static bool IsMatchDeviceID(string deviceIDFromRegistry)
