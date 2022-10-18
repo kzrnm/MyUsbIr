@@ -1,0 +1,5 @@
+[{*.csproj,Directory.Build.props}]
+charset = utf-8
+indent_style = space
+indent_size = 2
+tab_width = 2

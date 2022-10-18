@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.IO.Compression;
+using System.Linq;
 using UsbIr;
 
 namespace UsbIrRunner
@@ -112,7 +109,7 @@ namespace UsbIrRunner
 
                 return 0;
             }
-            catch(UsbIrException e)
+            catch (UsbIrException e)
             {
                 Console.Error.WriteLine("失敗しました");
                 Console.Error.WriteLine(e.Message);
@@ -122,9 +119,15 @@ namespace UsbIrRunner
 
         static byte[] Decompress(Stream decompressStream)
         {
+#if NETFRAMEWORK
+            var buffer = new byte[9600];
+            int readSize = decompressStream.Read(buffer, 0, buffer.Length);
+            return buffer.Take(readSize).ToArray();
+#else
             Span<byte> buffer = stackalloc byte[9600];
             int readSize = decompressStream.Read(buffer);
             return buffer.Slice(0, readSize).ToArray();
+#endif
         }
         static byte[] GetBytesEither(string filePath, string base64String)
         {

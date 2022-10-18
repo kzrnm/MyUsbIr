@@ -41,8 +41,8 @@ namespace UsbIr
             "";
 #endif
             return
-                deviceIDFromRegistry.AsSpan().Contains(DeviceIDToFind, StringComparison.OrdinalIgnoreCase)
-                && deviceIDFromRegistry.AsSpan().Contains(DeviceIDToFind2, StringComparison.OrdinalIgnoreCase);
+                deviceIDFromRegistry.IndexOf(DeviceIDToFind, StringComparison.OrdinalIgnoreCase) >= 0
+                && deviceIDFromRegistry.IndexOf(DeviceIDToFind2, StringComparison.OrdinalIgnoreCase) >= 0;
         }
         private bool IsMatchDeviceIndex(uint interfaceIndex)
         {

@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using Microsoft.Win32.SafeHandles;
+﻿using Microsoft.Win32.SafeHandles;
+using System;
 using System.Runtime.InteropServices;
 using static UsbIr.NativeMethods;
-using System.Linq;
-using System.Diagnostics.CodeAnalysis;
 
 
 namespace UsbIr
@@ -50,7 +46,7 @@ namespace UsbIr
 
         #region constants
         //Globally Unique Identifier (GUID) for HID class devices.  Windows uses GUIDs to identify things.
-        internal static readonly Guid InterfaceClassGuid = new Guid(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
+        internal static readonly Guid InterfaceClassGuid = new(0x4d1e55b2, 0xf16f, 0x11cf, 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30);
 
         ////Other constant definitions
         private const uint DBT_DEVTYP_DEVICEINTERFACE = 0x05;

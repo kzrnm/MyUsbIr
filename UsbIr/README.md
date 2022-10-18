@@ -17,16 +17,16 @@
 ```c#
 class Program
 {
-    static void Main(string[] args)
+    static async Task Main(string[] args)
     {
         using (var usbIr = new UsbIr.UsbIr())
         {
-            usbIr.StartRecoding(38000);
-            System.Threading.Thread.Sleep(2000); // この間に受信する
+            usbIr.StartRecoding();
+            await System.Threading.Tasks.Task.Delay(5000); // この間に受信する
             usbIr.EndRecoding();
             byte[] res = usbIr.Read();
 
-            usbIr.Send(res, 38000);
+            usbIr.Send(res);
         }
     }
 }
@@ -34,7 +34,7 @@ class Program
 
 ## 環境
 
-.NET Framework 3.5以上を想定しています。.NET Core 3でも可
+.NET Framework 4.6.2 以上を想定しています。.NET 6 でも可
 
 ## 参考にしたもの
 
