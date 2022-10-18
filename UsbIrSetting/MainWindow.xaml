@@ -12,8 +12,7 @@
         <local:MainViewModel/>
     </Window.DataContext>
     <Window.Resources>
-        <local:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
-        <local:BoolToVisibilityInverseConverter x:Key="BoolToVisibilityInverseConverter"/>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
     </Window.Resources>
     <StackPanel Margin="5">
         <StackPanel.Resources>
@@ -66,11 +65,11 @@
                 <Button Grid.Row="0" Grid.Column="1"
                     Content="{x:Static properties:Resources.Start}" 
                     Command="{Binding StartReadingCommand}"
-                    Visibility="{Binding IsReading, Converter={StaticResource BoolToVisibilityInverseConverter}}"/>
+                    Visibility="{Binding IsIdle, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                 <Button Grid.Row="0" Grid.Column="1"
                     Content="{x:Static properties:Resources.End}" 
                     Command="{Binding EndReadingCommand}"
-                    Visibility="{Binding IsReading, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    Visibility="{Binding IsReading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                 <Button Margin="5,0" Grid.Row="0" Grid.Column="2"
                     Content="{x:Static properties:Resources.Import}" 
                     Command="{Binding ImportCommand}"/>

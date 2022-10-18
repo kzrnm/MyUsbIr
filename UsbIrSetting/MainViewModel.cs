@@ -1,25 +1,20 @@
 ﻿using Microsoft.Win32;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
-using System.Linq;
-using System.Text;
-using UsbIr;
 
 namespace UsbIrSetting
 {
     public class MainViewModel : BindableBase
     {
-        private readonly UsbIr.UsbIr usbIr = new UsbIr.UsbIr();
+        private readonly UsbIr.UsbIr usbIr = new();
 
         private byte[] _RawResult;
         private byte[] RawResult
         {
             set
             {
-                this._RawResult = value;
-                this.Result = Clip(value, this.ClipUnit);
+                _RawResult = value;
+                Result = Clip(value, ClipUnit);
             }
             get => _RawResult;
         }
@@ -29,12 +24,12 @@ namespace UsbIrSetting
         {
             set
             {
-                this._Result = value;
-                this.SendCommand.RaiseCanExecuteChanged();
-                this.SaveCommand.RaiseCanExecuteChanged();
-                this.Base64String = Convert.ToBase64String(value);
-                this.Base64GZipString = Convert.ToBase64String(Compress.CompressGZip(value));
-                this.Base64DeflateString = Convert.ToBase64String(Compress.CompressDeflate(value));
+                _Result = value;
+                SendCommand.RaiseCanExecuteChanged();
+                SaveCommand.RaiseCanExecuteChanged();
+                Base64String = Convert.ToBase64String(value);
+                Base64GZipString = Convert.ToBase64String(Compress.CompressGZip(value));
+                Base64DeflateString = Convert.ToBase64String(Compress.CompressDeflate(value));
             }
             get => _Result;
         }
@@ -44,8 +39,8 @@ namespace UsbIrSetting
         {
             set
             {
-                if (this.RawResult != null)
-                    this.Result = Clip(this.RawResult, value);
+                if (RawResult != null)
+                    Result = Clip(RawResult, value);
                 SetProperty(ref _ClipUnit, value);
             }
             get => _ClipUnit;
@@ -108,45 +103,53 @@ namespace UsbIrSetting
         private bool _IsReading;
         public bool IsReading
         {
-            set => SetProperty(ref _IsReading, value);
+            set
+            {
+                if (SetProperty(ref _IsReading, value))
+                {
+                    RaisePropertyChanged(nameof(IsIdle));
+                }
+            }
             get => _IsReading;
         }
 
-        public bool HasResult => this.Result != null && this.Result.Length > 0;
+        public bool IsIdle => !_IsReading;
+
+        public bool HasResult => Result != null && Result.Length > 0;
 
         private RelayCommand _StartReadingCommand;
         public RelayCommand StartReadingCommand
-            => _StartReadingCommand ?? (_StartReadingCommand = new RelayCommand(this.StartReading));
+            => _StartReadingCommand ??= new RelayCommand(StartReading);
         private RelayCommand _EndReadingCommand;
         public RelayCommand EndReadingCommand
-            => _EndReadingCommand ?? (_EndReadingCommand = new RelayCommand(this.EndReading));
+            => _EndReadingCommand ??= new RelayCommand(EndReading);
         private RelayCommand _SendCommand;
         public RelayCommand SendCommand
-            => _SendCommand ?? (_SendCommand = new RelayCommand(this.Send, () => this.HasResult));
+            => _SendCommand ??= new RelayCommand(Send, () => HasResult);
 
         private RelayCommand _ImportCommand;
         public RelayCommand ImportCommand
-            => _ImportCommand ?? (_ImportCommand = new RelayCommand(this.Import));
+            => _ImportCommand ??= new RelayCommand(Import);
         private RelayCommand _SaveCommand;
         public RelayCommand SaveCommand
-            => _SaveCommand ?? (_SaveCommand = new RelayCommand(this.Save, () => this.HasResult));
+            => _SaveCommand ??= new RelayCommand(Save, () => HasResult);
 
         private void StartReading()
         {
-            this.IsReading = true;
-            this.usbIr.StartRecoding(this.Frequency);
+            IsReading = true;
+            usbIr.StartRecoding(Frequency);
         }
         private void EndReading()
         {
-            this.usbIr.EndRecoding();
-            this.RawResult = this.usbIr.Read();
-            this.IsReading = false;
+            usbIr.EndRecoding();
+            RawResult = usbIr.Read();
+            IsReading = false;
         }
         private void Send()
         {
             try
             {
-                this.usbIr.Send(this.Result, this.Frequency);
+                usbIr.Send(Result, Frequency);
             }
             catch
             {
@@ -155,22 +158,26 @@ namespace UsbIrSetting
 
         private void Import()
         {
-            var dialog = new OpenFileDialog();
-            dialog.Title = "ファイルを開く";
-            dialog.Filter = "全てのファイル(*.*)|*.*";
+            var dialog = new OpenFileDialog
+            {
+                Title = "ファイルを開く",
+                Filter = "全てのファイル(*.*)|*.*"
+            };
             if (dialog.ShowDialog() == true)
             {
-                this.RawResult = File.ReadAllBytes(dialog.FileName);
+                RawResult = File.ReadAllBytes(dialog.FileName);
             }
         }
         private void Save()
         {
-            var dialog = new SaveFileDialog();
-            dialog.Title = "ファイルを保存";
-            dialog.Filter = "全てのファイル(*.*)|*.*";
+            var dialog = new SaveFileDialog
+            {
+                Title = "ファイルを保存",
+                Filter = "全てのファイル(*.*)|*.*"
+            };
             if (dialog.ShowDialog() == true)
             {
-                File.WriteAllBytes(dialog.FileName, this.Result);
+                File.WriteAllBytes(dialog.FileName, Result);
             }
         }
         public MainViewModel()
